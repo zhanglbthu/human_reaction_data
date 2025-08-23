@@ -84,9 +84,9 @@ def sphere2pose(c2ws_input, theta, phi, r, device, x=None, y=None):
 
     # 先沿着世界坐标系z轴方向平移再旋转
     c2ws[:, 2, 3] -= r
-    if x is not None:
-        c2ws[:, 1, 3] += y
     if y is not None:
+        c2ws[:, 1, 3] += y
+    if x is not None:
         c2ws[:, 0, 3] -= x
 
     theta = torch.deg2rad(torch.tensor(theta)).to(device)
@@ -165,7 +165,7 @@ def txt_interpolation(input_list, n, mode='smooth'):
     return ynew
 
 
-def generate_traj_txt(c2ws_anchor, phi, theta, r, frame, device):
+def generate_traj_txt(c2ws_anchor, phi, theta, r, frame, device, x=None, y=None):
     # Initialize a camera.
     """
     The camera coordinate sysmte in COLMAP is right-down-forward
@@ -192,12 +192,29 @@ def generate_traj_txt(c2ws_anchor, phi, theta, r, frame, device):
         rs[-1] = r[-1]
     else:
         rs = txt_interpolation(r, frame, mode='linear')
+        
+    if x is not None:
+        if len(x) > 3:
+            xs = txt_interpolation(x, frame, mode='smooth')
+            xs[0] = x[0]
+            xs[-1] = x[-1]
+        else:
+            xs = txt_interpolation(x, frame, mode='linear')
+    
+    if y is not None:
+        if len(y) > 3:
+            ys = txt_interpolation(y, frame, mode='smooth')
+            ys[0] = y[0]
+            ys[-1] = y[-1]
+        else:
+            ys = txt_interpolation(y, frame, mode='linear')
+        
     # rs = rs*c2ws_anchor[0,2,3].cpu().numpy()
 
     c2ws_list = []
-    for th, ph, r in zip(thetas, phis, rs):
+    for th, ph, r, x, y in zip(thetas, phis, rs, xs, ys):
         c2w_new = sphere2pose(
-            c2ws_anchor, np.float32(th), np.float32(ph), np.float32(r), device
+            c2ws_anchor, np.float32(th), np.float32(ph), np.float32(r), device, np.float32(x), np.float32(y)
         )
         c2ws_list.append(c2w_new)
     c2ws = torch.cat(c2ws_list, dim=0)

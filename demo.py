@@ -508,6 +508,9 @@ class TrajCrafter:
         return generated_text + opts.refine_prompt
 
     def get_poses(self, opts, depths, num_frames):
+        '''
+        depths: [49, 1, H, W]
+        '''
         radius = (
             depths[0, 0, depths.shape[-2] // 2, depths.shape[-1] // 2].cpu()
             * opts.radius_scale
@@ -543,8 +546,10 @@ class TrajCrafter:
                 lines = file.readlines()
                 theta = [float(i) for i in lines[0].split()]
                 phi = [float(i) for i in lines[1].split()]
-                r = [float(i) * radius for i in lines[2].split()]
-            poses = generate_traj_txt(c2w_init, phi, theta, r, num_frames, opts.device)
+                x = [float(i) * radius for i in lines[2].split()]
+                y = [float(i) * radius for i in lines[3].split()]
+                r = [float(i) * radius for i in lines[4].split()]
+            poses = generate_traj_txt(c2w_init, phi, theta, r, num_frames, opts.device, x, y)
         poses[:, 2, 3] = poses[:, 2, 3] + radius
         pose_s = poses[opts.anchor_idx : opts.anchor_idx + 1].repeat(num_frames, 1, 1)
         pose_t = poses
