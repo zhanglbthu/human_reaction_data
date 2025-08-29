@@ -214,7 +214,7 @@ def generate_traj_txt(c2ws_anchor, phi, theta, r, frame, device, x=None, y=None)
     c2ws_list = []
     for th, ph, r, x, y in zip(thetas, phis, rs, xs, ys):
         c2w_new = sphere2pose(
-            c2ws_anchor, np.float32(th), np.float32(ph), np.float32(r), device, np.float32(x), np.float32(y)
+            c2ws_anchor, np.float32(th), np.float32(ph), np.float32(r), device, np.float32(x)
         )
         c2ws_list.append(c2w_new)
     c2ws = torch.cat(c2ws_list, dim=0)

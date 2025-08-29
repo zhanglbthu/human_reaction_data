@@ -157,7 +157,7 @@ if __name__ == "__main__":
     dataset = VideoMotionDataset("train_debug.txt", num_frames=98, root_dir="/root/autodl-tmp/VIMO")
     print(f"Dataset size: {len(dataset)}")
 
-    out_dir = "/root/autodl-tmp/VIMO/processed"
+    out_dir = "/root/autodl-tmp/VIMO/processed/automobile_rush_towards"
     subprocess.run(f"rm -rf {out_dir}/*", shell=True)
     os.makedirs(out_dir, exist_ok=True)
     # 清空输出目录
