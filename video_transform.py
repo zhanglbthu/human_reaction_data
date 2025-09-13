@@ -6,6 +6,7 @@ from utils.plot_script import plot_3d_motion
 from utils.motion_process import recover_from_ric
 from os.path import join as pjoin, basename, splitext
 from utils import paramUtil
+from utils.my_utils import cartesian_to_spherical, crop_to_aspect_ratio, interpolate_frames, convert_to_h264
 import subprocess
 
 kinematic_chain = paramUtil.t2m_kinematic_chain
@@ -15,13 +16,13 @@ data_root = '/root/autodl-tmp/VIMO'
 mean = np.load(pjoin(data_root, 'Mean.npy'))
 std = np.load(pjoin(data_root, 'Std.npy'))
 
-def plot_t2m(data, save_dir):
+def plot_t2m(data, save_dir, head_traj_smooth=None):
     # data = data * std + mean
     joint_data = data
     joint = recover_from_ric(torch.from_numpy(joint_data).float(), 22).numpy()
 
     save_path = pjoin(save_dir, 'motion.mp4')
-    plot_3d_motion(save_path, kinematic_chain, joint, title="", fps=30, radius=radius)
+    plot_3d_motion(save_path, kinematic_chain, joint, title="", fps=30, radius=radius, smooth_traj=head_traj_smooth)
 
 def get_head_traj(data):
     joint_data = data
@@ -30,24 +31,53 @@ def get_head_traj(data):
     MINS = joint.min(axis=0).min(axis=0)
     
     height_offset = MINS[1]
-    joint[:, :, 1] -= height_offset  # 把头部高度归零
+    joint[:, :, 1] -= height_offset
     
     head_traj = joint[:, 15]
     
     return head_traj
 
-def cartesian_to_spherical(x, y, z):
+def smooth_head_traj(head_traj, n_segments=5):
     """
-    将笛卡尔坐标 (x,y,z) 转换为球坐标 (theta, phi, r)
-    motion坐标系: z 前, y 上
-    - r: 距离
-    - theta: 上下角度 (绕x轴)，弧度转角度
-    - phi: 左右角度 (绕y轴)，弧度转角度
+    head_traj: numpy array [T, 3]
+    n_segments: 拟合的分段数
     """
-    r = np.sqrt(x**2 + y**2 + z**2) + 1e-6
-    theta = np.degrees(np.arcsin(y / r))    # y控制仰角
-    phi = np.degrees(np.arctan2(x, z))      # x,z控制水平角
-    return theta, phi, r
+    from scipy.optimize import least_squares
+    
+    def bezier(t, P0, P1, P2, P3):
+        return (1-t)**3 * P0 + 3*(1-t)**2*t * P1 + 3*(1-t)*t**2 * P2 + t**3 * P3
+
+    def residual(control_points, t, target_points, P0, P3):
+        P1, P2 = control_points.reshape(2, -1)
+        curve = np.array([bezier(tt, P0, P1, P2, P3) for tt in t])
+        return (curve - target_points).ravel()
+
+    seg_len = len(head_traj) // n_segments
+    curves = []
+    for i in range(n_segments):
+        start = i * seg_len
+        end = (i+1) * seg_len if i < n_segments-1 else len(head_traj)-1
+        seg_points = head_traj[start:end+1]
+        P0, P3 = seg_points[0], seg_points[-1]
+        t = np.linspace(0, 1, len(seg_points))
+        init_control = np.array([seg_points[1], seg_points[-2]]).ravel()
+        res = least_squares(residual, init_control, args=(t, seg_points, P0, P3))
+        P1, P2 = res.x.reshape(2, -1)
+        curves.append((P0, P1, P2, P3))
+
+    # 重建平滑轨迹
+    smooth_traj = []
+    for (P0, P1, P2, P3) in curves:
+        t_vals = np.linspace(0, 1, 50)  # 每段采样50点
+        seg_curve = np.array([bezier(tt, P0, P1, P2, P3) for tt in t_vals])
+        smooth_traj.append(seg_curve)
+    smooth_traj = np.vstack(smooth_traj)
+    
+    from scipy.interpolate import interp1d
+    x = np.linspace(0, 1, len(smooth_traj))
+    f = interp1d(x, smooth_traj, axis=0)
+    smooth_traj = f(np.linspace(0, 1, len(head_traj)))  # 插值到原始长度
+    return smooth_traj
 
 def save_traj_txt(head_traj, save_path):
     """
@@ -77,26 +107,6 @@ def save_traj_txt(head_traj, save_path):
         f.write(" ".join([f"{y:.4f}" for y in ys]) + "\n")
         f.write(" ".join([f"{z:.4f}" for z in zs]) + "\n")
 
-def crop_to_aspect_ratio(frame, target_ratio=(16, 9)):
-    h, w = frame.shape[:2]
-    target_w, target_h = target_ratio
-    if w / h > target_w / target_h:
-        new_w = int(h * target_w / target_h)
-        x0 = (w - new_w) // 2
-        frame = frame[:, x0:x0 + new_w]
-    else:
-        new_h = int(w * target_h / target_w)
-        y0 = (h - new_h) // 2
-        frame = frame[y0:y0 + new_h, :]
-    return frame
-
-def interpolate_frames(frames, target_num=98):
-    n = len(frames)
-    if n == 0:
-        return []
-    idxs = np.linspace(0, n - 1, target_num).astype(int)
-    return [frames[i] for i in idxs]
-
 def load_video_and_motion(video_path, motion_path, num_frames=98):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -118,26 +128,12 @@ def load_video_and_motion(video_path, motion_path, num_frames=98):
     motion = np.load(motion_path)  # shape: (T,D)
     return frames, motion
 
-def convert_to_h264(input_path, output_path):
-    """调用 ffmpeg 把 mp4v 转成 H.264"""
-    cmd = [
-        "ffmpeg", "-y",  # 覆盖已存在文件
-        "-i", input_path,
-        "-c:v", "libx264", "-crf", "23", "-preset", "fast",
-        "-c:a", "aac", "-b:a", "128k",
-        output_path
-    ]
-    try:
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError as e:
-        print(f"FFmpeg conversion failed: {e.stderr.decode()}")
-
 class VideoMotionDataset:
     def __init__(self, split_file, num_frames=98, root_dir="."):
         self.samples = []
         self.num_frames = num_frames
         self.root_dir = root_dir
-        split_path = os.path.join(root_dir, split_file)
+        split_path = os.path.join(root_dir, 'split', split_file)
         with open(split_path, "r") as f:
             for line in f:
                 video_path, motion_path = line.strip().split()
@@ -154,10 +150,13 @@ class VideoMotionDataset:
         return frames, motion, video_path, motion_path
 
 if __name__ == "__main__":
-    dataset = VideoMotionDataset("train_debug.txt", num_frames=98, root_dir="/root/autodl-tmp/VIMO")
+    category = "automobile_rush_towards"
+    txt_name = f"{category}.txt"
+    
+    dataset = VideoMotionDataset(txt_name, num_frames=98, root_dir="/root/autodl-tmp/VIMO")
     print(f"Dataset size: {len(dataset)}")
 
-    out_dir = "/root/autodl-tmp/VIMO/processed/automobile_rush_towards"
+    out_dir = os.path.join(data_root, "processed", category)
     subprocess.run(f"rm -rf {out_dir}/*", shell=True)
     os.makedirs(out_dir, exist_ok=True)
     # 清空输出目录
@@ -184,12 +183,13 @@ if __name__ == "__main__":
         
         # Step 3: 删除临时文件
         os.remove(tmp_path)
-
-        # 保存 motion 可视化 (可能有多段)
-        plot_t2m(motion, sample_dir)
         
         head_traj = get_head_traj(motion) # global head trajectory
+        head_traj_smooth = smooth_head_traj(head_traj, n_segments=3)
+        
+        plot_t2m(motion, sample_dir, head_traj_smooth=head_traj_smooth)
+        
         traj_txt_path = pjoin(sample_dir, "traj.txt")
-        save_traj_txt(head_traj, traj_txt_path)
+        save_traj_txt(head_traj_smooth, traj_txt_path)
 
         print(f"Saved sample {video_name} to {sample_dir}")

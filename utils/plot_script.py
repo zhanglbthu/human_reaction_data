@@ -320,7 +320,7 @@ def plot_3d_motion_gt_pred(save_path, kinematic_tree, gt_joints, pred_joints, ti
     ani.save(save_path, fps=fps)
     plt.close()
 
-def plot_3d_motion(save_path, kinematic_tree, joints, title, figsize=(10, 10), fps=120, radius=4):
+def plot_3d_motion(save_path, kinematic_tree, joints, title, figsize=(10, 10), fps=120, radius=4, smooth_traj=None):
     matplotlib.use('Agg')
 
     title_sp = title.split(' ')
@@ -379,9 +379,17 @@ def plot_3d_motion(save_path, kinematic_tree, joints, title, figsize=(10, 10), f
                 trajec_head[:index+1, 0],
                 trajec_head[:index+1, 1],
                 trajec_head[:index+1, 2],
-                linewidth=1.0,
+                linewidth=1.5,
                 color='red'
             )
+            if smooth_traj is not None:
+                ax.plot3D(
+                    smooth_traj[:index+1, 0],
+                    smooth_traj[:index+1, 1],
+                    smooth_traj[:index+1, 2],
+                    linewidth=1.5,
+                    color='green'
+                )
         
         for i, (chain, color) in enumerate(zip(kinematic_tree, colors)):
             #             print(color)

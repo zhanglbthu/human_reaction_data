@@ -11,8 +11,11 @@
 
 #!/bin/bash
 
-root_dir="/root/autodl-tmp/VIMO/processed/automobile_rush_towards"
-out_dir="/root/autodl-tmp/VIMO/cam_align/automobile_rush_towards"
+# root_dir="/root/autodl-tmp/VIMO/processed/automobile_rush_towards"
+# out_dir="/root/autodl-tmp/VIMO/cam_align/automobile_rush_towards"
+category="automobile_rush_towards"
+root_dir="/root/autodl-tmp/VIMO/processed/$category"
+out_dir="/root/autodl-tmp/VIMO/cam_align/$category"
 
 for sub_dir in "$root_dir"/*; do
     if [ -d "$sub_dir" ]; then
